@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HVAC Balance Point Grapher</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Chart.js for graphing -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7fafc; }
+        .input-group { transition: all 0.3s ease; }
+        .result-box {
+            background-color: #ecfdf5; 
+            border: 2px solid #10b981; 
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        canvas { max-height: 500px; }
+        /* Responsive adjustments for the graph container */
+        .chart-container {
+            position: relative;
+            height: 70vh; /* Adjust height for better mobile viewing */
+            width: 100%;
+            min-height: 400px;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto bg-white p-6 md:p-10 rounded-xl shadow-2xl">
+        <header class="mb-8 border-b pb-4">
+            <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight">HVAC Balance Point Grapher</h1>
+            <p class="text-gray-500 mt-1">Visualize the intersection of your heat pump capacity and home heat load.</p>
+        </header>
+
+        <!-- Main Grid for Inputs and Graph -->
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
+            
+            <!-- Left Column: Inputs -->
+            <div class="space-y-6 xl:col-span-1">
+                <h2 class="text-xl font-bold text-indigo-600 border-b pb-2">Unit Selection</h2>
+                <div class="input-group p-4 bg-indigo-50 rounded-lg shadow-sm">
+                    <label for="hvacUnit" class="block text-sm font-semibold text-gray-700 mb-2">1. Select HVAC Combination:</label>
+                    <select id="hvacUnit" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 bg-white shadow-sm">
+                        <!-- Options populated by JavaScript -->
+                    </select>
+                </div>
+                
+                <h2 class="text-xl font-bold text-blue-600 border-b pb-2 pt-4">House Load Parameters</h2>
+                <!-- Heat Load Parameters for the House Line -->
+                <div class="space-y-4 p-4 bg-blue-50 rounded-lg shadow-sm">
+                    <div class="input-group">
+                        <label for="designLoad" class="block text-sm font-medium text-gray-700">2. Design Heat Load (kBTU/h):</label>
+                        <input type="number" id="designLoad" value="40" min="1" step="1"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 shadow-sm">
+                        <p class="text-xs text-gray-500 mt-1">The maximum heat required on the coldest day.</p>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="designTemp" class="block text-sm font-medium text-gray-700">3. Outdoor Design Temperature (°F):</label>
+                        <input type="number" id="designTemp" value="5"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 shadow-sm">
+                        <p class="text-xs text-gray-500 mt-1">The coldest temperature used for the design load (e.g., 5°F).</p>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="setPoint" class="block text-sm font-medium text-gray-700">4. Indoor Set Point (°F):</label>
+                        <input type="number" id="setPoint" value="70" min="50" step="1"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 shadow-sm">
+                        <p class="text-xs text-gray-500 mt-1">The constant indoor temperature maintained (typically 70°F).</p>
+                    </div>
+                </div>
+
+                <button onclick="calculateAndPlot()" 
+                        class="w-full bg-green-600 text-white font-semibold py-3 px-4 rounded-lg shadow-lg hover:bg-green-700 transition duration-150 ease-in-out transform hover:scale-[1.01]">
+                    Calculate & Plot Intersection
+                </button>
+            </div>
+
+            <!-- Right Column: Graph and Results -->
+            <div class="xl:col-span-2">
+                <div class="bg-gray-50 p-6 rounded-xl shadow-inner chart-container">
+                    <canvas id="balancePointChart"></canvas>
+                </div>
+
+                <div id="resultOutput" class="result-box p-6 rounded-xl mt-6 text-center">
+                    <p class="text-xl font-bold text-gray-700">Balance Point: <span id="bpValue" class="text-green-600 text-4xl">--</span></p>
+                    <p class="text-sm text-gray-600 mt-1" id="bpMessage">Enter parameters and calculate to see the result.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let balancePointChart;
+
+        // --- COMPLETE HVAC PERFORMANCE DATA (kBTU/h) LOADED FROM SPREADSHEET ---
+        const HVAC_DATA = {
+            "BOVA-24RXB-M15S+BIVA-24RXB-M15X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Light AHU – Heating Mode",
+                "airflow": 800,
+                "ratings": [
+                    { "temp": 86, "capacity": 26.8 },
+                    { "temp": 72, "capacity": 24.5 },
+                    { "temp": 67, "capacity": 24.7 },
+                    { "temp": 62, "capacity": 24.2 },
+                    { "temp": 57, "capacity": 25.7 },
+                    { "temp": 52, "capacity": 24.6 },
+                    { "temp": 47, "capacity": 24.2 },
+                    { "temp": 42, "capacity": 23.4 },
+                    { "temp": 37, "capacity": 22.6 },
+                    { "temp": 32, "capacity": 23.2 },
+                    { "temp": 27, "capacity": 22.2 },
+                    { "temp": 22, "capacity": 21.7 },
+                    { "temp": 17, "capacity": 20.5 },
+                    { "temp": 12, "capacity": 19.7 },
+                    { "temp": 7, "capacity": 17.9 },
+                    { "temp": 3, "capacity": 16.2 }
+                ]
+            },
+            "BOVA-36RXB-M15S+BIVA-24RXB-M15X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Light AHU – Heating Mode",
+                "airflow": 800,
+                "ratings": [
+                    { "temp": 86, "capacity": 25.4 },
+                    { "temp": 72, "capacity": 24.1 },
+                    { "temp": 67, "capacity": 24.0 },
+                    { "temp": 62, "capacity": 24.0 },
+                    { "temp": 57, "capacity": 23.4 },
+                    { "temp": 52, "capacity": 23.8 },
+                    { "temp": 47, "capacity": 24.0 },
+                    { "temp": 42, "capacity": 23.1 },
+                    { "temp": 37, "capacity": 22.9 },
+                    { "temp": 32, "capacity": 22.2 },
+                    { "temp": 27, "capacity": 20.8 },
+                    { "temp": 22, "capacity": 20.9 },
+                    { "temp": 17, "capacity": 20.5 },
+                    { "temp": 12, "capacity": 18.3 },
+                    { "temp": 7, "capacity": 18.1 },
+                    { "temp": 3, "capacity": 17.5 }
+                ]
+            },
+            "BOVA-36RXB-M15S+BIVA-36RXB-M15X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Light AHU – Heating Mode",
+                "airflow": 1000,
+                "ratings": [
+                    { "temp": 86, "capacity": 36.7 },
+                    { "temp": 72, "capacity": 34.0 },
+                    { "temp": 67, "capacity": 34.1 },
+                    { "temp": 62, "capacity": 33.3 },
+                    { "temp": 57, "capacity": 33.8 },
+                    { "temp": 52, "capacity": 33.4 },
+                    { "temp": 47, "capacity": 33.0 },
+                    { "temp": 42, "capacity": 32.6 },
+                    { "temp": 37, "capacity": 30.9 },
+                    { "temp": 32, "capacity": 28.7 },
+                    { "temp": 27, "capacity": 28.3 },
+                    { "temp": 22, "capacity": 26.7 },
+                    { "temp": 17, "capacity": 24.7 },
+                    { "temp": 12, "capacity": 26.0 },
+                    { "temp": 7, "capacity": 24.4 },
+                    { "temp": 3, "capacity": 22.8 }
+                ]
+            },
+            "BOVA-60RXB-M15S+BIVA-36RXB-M15X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Light AHU – Heating Mode",
+                "airflow": 1000,
+                "ratings": [
+                    { "temp": 86, "capacity": 51.5 },
+                    { "temp": 72, "capacity": 45.2 },
+                    { "temp": 67, "capacity": 44.1 },
+                    { "temp": 62, "capacity": 41.0 },
+                    { "temp": 57, "capacity": 40.4 },
+                    { "temp": 52, "capacity": 38.0 },
+                    { "temp": 47, "capacity": 35.2 },
+                    { "temp": 42, "capacity": 32.6 },
+                    { "temp": 37, "capacity": 30.0 },
+                    { "temp": 32, "capacity": 27.4 },
+                    { "temp": 27, "capacity": 25.4 },
+                    { "temp": 22, "capacity": 38.8 },
+                    { "temp": 17, "capacity": 29.1 },
+                    { "temp": 12, "capacity": 29.7 },
+                    { "temp": 7, "capacity": 28.9 },
+                    { "temp": 3, "capacity": 26.6 }
+                ]
+            },
+            "BOVA-60RXB-M15S+BIVA-48RXB-M15X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Light AHU – Heating Mode",
+                "airflow": 1500,
+                "ratings": [
+                    { "temp": 86, "capacity": 51.0 },
+                    { "temp": 72, "capacity": 50.0 },
+                    { "temp": 67, "capacity": 49.9 },
+                    { "temp": 62, "capacity": 48.3 },
+                    { "temp": 57, "capacity": 48.4 },
+                    { "temp": 52, "capacity": 49.4 },
+                    { "temp": 47, "capacity": 48.0 },
+                    { "temp": 42, "capacity": 46.5 },
+                    { "temp": 37, "capacity": 44.9 },
+                    { "temp": 32, "capacity": 41.4 },
+                    { "temp": 27, "capacity": 40.8 },
+                    { "temp": 22, "capacity": 40.1 },
+                    { "temp": 17, "capacity": 38.5 },
+                    { "temp": 12, "capacity": 36.2 },
+                    { "temp": 7, "capacity": 34.6 },
+                    { "temp": 3, "capacity": 33.2 }
+                ]
+            },
+            "BOVA-60RXB-M15S+BIVA-60RXB-M15X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Light AHU – Heating Mode",
+                "airflow": 1650,
+                "ratings": [
+                    { "temp": 86, "capacity": 61.2 },
+                    { "temp": 72, "capacity": 59.0 },
+                    { "temp": 67, "capacity": 58.4 },
+                    { "temp": 62, "capacity": 57.7 },
+                    { "temp": 57, "capacity": 57.8 },
+                    { "temp": 52, "capacity": 57.2 },
+                    { "temp": 47, "capacity": 56.0 },
+                    { "temp": 42, "capacity": 52.5 },
+                    { "temp": 37, "capacity": 48.8 },
+                    { "temp": 32, "capacity": 45.2 },
+                    { "temp": 27, "capacity": 46.7 },
+                    { "temp": 22, "capacity": 44.5 },
+                    { "temp": 17, "capacity": 41.4 },
+                    { "temp": 12, "capacity": 40.2 },
+                    { "temp": 7, "capacity": 36.5 },
+                    { "temp": 3, "capacity": 32.6 }
+                ]
+            },
+            "BOVA-24RXB-M15S+BIVA-24RCB-M20X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Premium AHU – Heating Mod",
+                "airflow": 710,
+                "ratings": [
+                    { "temp": 86, "capacity": 28.2 },
+                    { "temp": 72, "capacity": 24.5 },
+                    { "temp": 67, "capacity": 23.9 },
+                    { "temp": 62, "capacity": 22.4 },
+                    { "temp": 57, "capacity": 22.7 },
+                    { "temp": 52, "capacity": 21.7 },
+                    { "temp": 47, "capacity": 20.9 },
+                    { "temp": 42, "capacity": 19.2 },
+                    { "temp": 37, "capacity": 18.9 },
+                    { "temp": 32, "capacity": 21.8 },
+                    { "temp": 27, "capacity": 20.7 },
+                    { "temp": 22, "capacity": 21.3 },
+                    { "temp": 17, "capacity": 16.1 },
+                    { "temp": 12, "capacity": 16.5 },
+                    { "temp": 7, "capacity": 15.7 },
+                    { "temp": 3, "capacity": 15.3 }
+                ]
+            },
+            "BOVA-36RXB-M15S+BIVA-24RCB-M20X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Premium AHU – Heating Mod",
+                "airflow": 710,
+                "ratings": [
+                    { "temp": 86, "capacity": 19.4 },
+                    { "temp": 72, "capacity": 19.1 },
+                    { "temp": 67, "capacity": 19.0 },
+                    { "temp": 62, "capacity": 18.8 },
+                    { "temp": 57, "capacity": 19.5 },
+                    { "temp": 52, "capacity": 18.9 },
+                    { "temp": 47, "capacity": 18.9 },
+                    { "temp": 42, "capacity": 18.6 },
+                    { "temp": 37, "capacity": 18.3 },
+                    { "temp": 32, "capacity": 18.5 },
+                    { "temp": 27, "capacity": 18.3 },
+                    { "temp": 22, "capacity": 18.4 },
+                    { "temp": 17, "capacity": 18.4 },
+                    { "temp": 12, "capacity": 15.8 },
+                    { "temp": 7, "capacity": 15.5 },
+                    { "temp": 3, "capacity": 14.7 }
+                ]
+            },
+            "BOVA-36RXB-M15S+BIVA-36RCB-M20X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Premium AHU – Heating Mod",
+                "airflow": 1000,
+                "ratings": [
+                    { "temp": 86, "capacity": 35.4 },
+                    { "temp": 72, "capacity": 33.8 },
+                    { "temp": 67, "capacity": 33.4 },
+                    { "temp": 62, "capacity": 33.3 },
+                    { "temp": 57, "capacity": 33.5 },
+                    { "temp": 52, "capacity": 33.4 },
+                    { "temp": 47, "capacity": 33.0 },
+                    { "temp": 42, "capacity": 32.2 },
+                    { "temp": 37, "capacity": 30.5 },
+                    { "temp": 32, "capacity": 28.3 },
+                    { "temp": 27, "capacity": 27.8 },
+                    { "temp": 22, "capacity": 26.2 },
+                    { "temp": 17, "capacity": 24.2 },
+                    { "temp": 12, "capacity": 23.8 },
+                    { "temp": 7, "capacity": 22.1 },
+                    { "temp": 3, "capacity": 20.6 }
+                ]
+            },
+            "BOVA-60RXB-M15S+BIVA-36RCB-M20X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Premium AHU – Heating Mod",
+                "airflow": 1000,
+                "ratings": [
+                    { "temp": 86, "capacity": 48.2 },
+                    { "temp": 72, "capacity": 42.8 },
+                    { "temp": 67, "capacity": 41.8 },
+                    { "temp": 62, "capacity": 39.2 },
+                    { "temp": 57, "capacity": 37.6 },
+                    { "temp": 52, "capacity": 35.2 },
+                    { "temp": 47, "capacity": 33.3 },
+                    { "temp": 42, "capacity": 30.8 },
+                    { "temp": 37, "capacity": 28.4 },
+                    { "temp": 32, "capacity": 26.0 },
+                    { "temp": 27, "capacity": 24.5 },
+                    { "temp": 22, "capacity": 24.7 },
+                    { "temp": 17, "capacity": 29.0 },
+                    { "temp": 12, "capacity": 29.6 },
+                    { "temp": 7, "capacity": 30.9 },
+                    { "temp": 3, "capacity": 30.4 }
+                ]
+            },
+            "BOVA-60RXB-M15S+BIVA-48RCB-M20X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Premium AHU – Heating Mod",
+                "airflow": 1580,
+                "ratings": [
+                    { "temp": 86, "capacity": 48.0 },
+                    { "temp": 72, "capacity": 46.1 },
+                    { "temp": 67, "capacity": 45.4 },
+                    { "temp": 62, "capacity": 46.0 },
+                    { "temp": 57, "capacity": 48.3 },
+                    { "temp": 52, "capacity": 46.7 },
+                    { "temp": 47, "capacity": 45.5 },
+                    { "temp": 42, "capacity": 44.0 },
+                    { "temp": 37, "capacity": 42.4 },
+                    { "temp": 32, "capacity": 45.2 },
+                    { "temp": 27, "capacity": 43.1 },
+                    { "temp": 22, "capacity": 45.9 },
+                    { "temp": 17, "capacity": 35.6 },
+                    { "temp": 12, "capacity": 34.3 },
+                    { "temp": 7, "capacity": 33.2 },
+                    { "temp": 3, "capacity": 31.5 }
+                ]
+            },
+            "BOVA-60RXB-M15S+BIVA-60RCB-M20X (Heating)": {
+                "consumerName": "IDS Light ODU + IDS Premium AHU – Heating Mod",
+                "airflow": 1560,
+                "ratings": [
+                    { "temp": 86, "capacity": 55.5 },
+                    { "temp": 72, "capacity": 53.2 },
+                    { "temp": 67, "capacity": 53.3 },
+                    { "temp": 62, "capacity": 52.9 },
+                    { "temp": 57, "capacity": 53.1 },
+                    { "temp": 52, "capacity": 52.6 },
+                    { "temp": 47, "capacity": 51.8 },
+                    { "temp": 42, "capacity": 51.6 },
+                    { "temp": 37, "capacity": 48.3 },
+                    { "temp": 32, "capacity": 44.5 },
+                    { "temp": 27, "capacity": 48.1 },
+                    { "temp": 22, "capacity": 45.3 },
+                    { "temp": 17, "capacity": 42.6 },
+                    { "temp": 12, "capacity": 45.4 },
+                    { "temp": 7, "capacity": 41.9 },
+                    { "temp": 3, "capacity": 38.3 }
+                ]
+            },
+            "BOVA20-36 + BIVA20-24 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 700,
+                "ratings": [
+                    { "temp": 86, "capacity": 21.8 },
+                    { "temp": 72, "capacity": 21.8 },
+                    { "temp": 67, "capacity": 21.8 },
+                    { "temp": 62, "capacity": 21.8 },
+                    { "temp": 57, "capacity": 21.8 },
+                    { "temp": 52, "capacity": 21.7 },
+                    { "temp": 47, "capacity": 21.7 },
+                    { "temp": 42, "capacity": 21.7 },
+                    { "temp": 37, "capacity": 21.6 },
+                    { "temp": 32, "capacity": 21.6 },
+                    { "temp": 27, "capacity": 21.3 },
+                    { "temp": 22, "capacity": 21.3 },
+                    { "temp": 17, "capacity": 20.4 },
+                    { "temp": 12, "capacity": 19.2 },
+                    { "temp": 7, "capacity": 18.3 },
+                    { "temp": 3, "capacity": 17.5 },
+                    { "temp": -4, "capacity": 16.9 }
+                ]
+            },
+            "BOVA20-36 + BIVA20-36 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 1050,
+                "ratings": [
+                    { "temp": 86, "capacity": 27.8 },
+                    { "temp": 72, "capacity": 27.8 },
+                    { "temp": 67, "capacity": 27.7 },
+                    { "temp": 62, "capacity": 27.7 },
+                    { "temp": 57, "capacity": 27.7 },
+                    { "temp": 52, "capacity": 27.6 },
+                    { "temp": 47, "capacity": 30.2 },
+                    { "temp": 42, "capacity": 29.8 },
+                    { "temp": 37, "capacity": 27.1 },
+                    { "temp": 32, "capacity": 25.8 },
+                    { "temp": 27, "capacity": 25.2 },
+                    { "temp": 22, "capacity": 24.3 },
+                    { "temp": 17, "capacity": 23.8 },
+                    { "temp": 12, "capacity": 23.0 },
+                    { "temp": 7, "capacity": 21.0 },
+                    { "temp": 3, "capacity": 19.6 },
+                    { "temp": -4, "capacity": 19.0 }
+                ]
+            },
+            "BOVA20-60 + BIVA20-48 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 1550,
+                "ratings": [
+                    { "temp": 86, "capacity": 44.7 },
+                    { "temp": 72, "capacity": 44.7 },
+                    { "temp": 67, "capacity": 44.6 },
+                    { "temp": 62, "capacity": 44.5 },
+                    { "temp": 57, "capacity": 44.5 },
+                    { "temp": 52, "capacity": 44.4 },
+                    { "temp": 47, "capacity": 44.8 },
+                    { "temp": 42, "capacity": 44.8 },
+                    { "temp": 37, "capacity": 44.8 },
+                    { "temp": 32, "capacity": 42.4 },
+                    { "temp": 27, "capacity": 40.3 },
+                    { "temp": 22, "capacity": 39.1 },
+                    { "temp": 17, "capacity": 37.3 },
+                    { "temp": 12, "capacity": 36.1 },
+                    { "temp": 7, "capacity": 34.3 },
+                    { "temp": 3, "capacity": 32.6 },
+                    { "temp": -4, "capacity": 31.0 }
+                ]
+            },
+            "BOVA20-60 + BIVA20-60 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 1550,
+                "ratings": [
+                    { "temp": 86, "capacity": 55.6 },
+                    { "temp": 72, "capacity": 55.6 },
+                    { "temp": 67, "capacity": 55.6 },
+                    { "temp": 62, "capacity": 55.6 },
+                    { "temp": 57, "capacity": 55.6 },
+                    { "temp": 52, "capacity": 55.6 },
+                    { "temp": 47, "capacity": 55.6 },
+                    { "temp": 42, "capacity": 55.6 },
+                    { "temp": 37, "capacity": 55.6 },
+                    { "temp": 32, "capacity": 53.0 },
+                    { "temp": 27, "capacity": 50.4 },
+                    { "temp": 22, "capacity": 48.7 },
+                    { "temp": 17, "capacity": 46.5 },
+                    { "temp": 12, "capacity": 45.0 },
+                    { "temp": 7, "capacity": 42.9 },
+                    { "temp": 3, "capacity": 40.9 },
+                    { "temp": -4, "capacity": 39.0 }
+                ]
+            },
+            "BOVA20-48 + BIVA20-48 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 1550,
+                "ratings": [
+                    { "temp": 86, "capacity": 44.7 },
+                    { "temp": 72, "capacity": 44.7 },
+                    { "temp": 67, "capacity": 44.6 },
+                    { "temp": 62, "capacity": 44.5 },
+                    { "temp": 57, "capacity": 44.5 },
+                    { "temp": 52, "capacity": 44.4 },
+                    { "temp": 47, "capacity": 44.8 },
+                    { "temp": 42, "capacity": 44.8 },
+                    { "temp": 37, "capacity": 44.8 },
+                    { "temp": 32, "capacity": 42.4 },
+                    { "temp": 27, "capacity": 40.3 },
+                    { "temp": 22, "capacity": 39.1 },
+                    { "temp": 17, "capacity": 37.3 },
+                    { "temp": 12, "capacity": 36.1 },
+                    { "temp": 7, "capacity": 34.3 },
+                    { "temp": 3, "capacity": 32.6 },
+                    { "temp": -4, "capacity": 31.0 }
+                ]
+            },
+            "BOVA20-48 + BIVA20-36 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 1050,
+                "ratings": [
+                    { "temp": 86, "capacity": 34.6 },
+                    { "temp": 72, "capacity": 34.6 },
+                    { "temp": 67, "capacity": 34.6 },
+                    { "temp": 62, "capacity": 34.6 },
+                    { "temp": 57, "capacity": 34.6 },
+                    { "temp": 52, "capacity": 34.6 },
+                    { "temp": 47, "capacity": 34.6 },
+                    { "temp": 42, "capacity": 34.6 },
+                    { "temp": 37, "capacity": 34.6 },
+                    { "temp": 32, "capacity": 33.7 },
+                    { "temp": 27, "capacity": 32.7 },
+                    { "temp": 22, "capacity": 31.8 },
+                    { "temp": 17, "capacity": 30.6 },
+                    { "temp": 12, "capacity": 29.5 },
+                    { "temp": 7, "capacity": 28.0 },
+                    { "temp": 3, "capacity": 26.6 },
+                    { "temp": -4, "capacity": 25.3 }
+                ]
+            },
+            "BOVA20-48 + BIVA20-60 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 1550,
+                "ratings": [
+                    { "temp": 86, "capacity": 44.7 },
+                    { "temp": 72, "capacity": 44.7 },
+                    { "temp": 67, "capacity": 44.6 },
+                    { "temp": 62, "capacity": 44.5 },
+                    { "temp": 57, "capacity": 44.5 },
+                    { "temp": 52, "capacity": 44.4 },
+                    { "temp": 47, "capacity": 44.8 },
+                    { "temp": 42, "capacity": 44.8 },
+                    { "temp": 37, "capacity": 44.8 },
+                    { "temp": 32, "capacity": 42.4 },
+                    { "temp": 27, "capacity": 40.3 },
+                    { "temp": 22, "capacity": 39.1 },
+                    { "temp": 17, "capacity": 37.3 },
+                    { "temp": 12, "capacity": 36.1 },
+                    { "temp": 7, "capacity": 34.3 },
+                    { "temp": 3, "capacity": 32.6 },
+                    { "temp": -4, "capacity": 31.0 }
+                ]
+            },
+            "BOVA20-48 + BIVA20-24 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 700,
+                "ratings": [
+                    { "temp": 86, "capacity": 31.3 },
+                    { "temp": 72, "capacity": 31.3 },
+                    { "temp": 67, "capacity": 31.3 },
+                    { "temp": 62, "capacity": 31.3 },
+                    { "temp": 57, "capacity": 31.3 },
+                    { "temp": 52, "capacity": 31.3 },
+                    { "temp": 47, "capacity": 31.3 },
+                    { "temp": 42, "capacity": 31.3 },
+                    { "temp": 37, "capacity": 31.3 },
+                    { "temp": 32, "capacity": 30.0 },
+                    { "temp": 27, "capacity": 28.7 },
+                    { "temp": 22, "capacity": 27.6 },
+                    { "temp": 17, "capacity": 26.3 },
+                    { "temp": 12, "capacity": 25.1 },
+                    { "temp": 7, "capacity": 23.5 },
+                    { "temp": 3, "capacity": 22.0 },
+                    { "temp": -4, "capacity": 20.7 }
+                ]
+            },
+            "BOVA20-36 + BIVA20-48 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 1550,
+                "ratings": [
+                    { "temp": 86, "capacity": 31.3 },
+                    { "temp": 72, "capacity": 31.3 },
+                    { "temp": 67, "capacity": 31.3 },
+                    { "temp": 62, "capacity": 31.3 },
+                    { "temp": 57, "capacity": 31.3 },
+                    { "temp": 52, "capacity": 31.3 },
+                    { "temp": 47, "capacity": 31.3 },
+                    { "temp": 42, "capacity": 31.3 },
+                    { "temp": 37, "capacity": 31.3 },
+                    { "temp": 32, "capacity": 30.0 },
+                    { "temp": 27, "capacity": 28.7 },
+                    { "temp": 22, "capacity": 27.6 },
+                    { "temp": 17, "capacity": 26.3 },
+                    { "temp": 12, "capacity": 25.1 },
+                    { "temp": 7, "capacity": 23.5 },
+                    { "temp": 3, "capacity": 22.0 },
+                    { "temp": -4, "capacity": 20.7 }
+                ]
+            },
+            "BOVA20-36 + BIVA20-60 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 1550,
+                "ratings": [
+                    { "temp": 86, "capacity": 31.3 },
+                    { "temp": 72, "capacity": 31.3 },
+                    { "temp": 67, "capacity": 31.3 },
+                    { "temp": 62, "capacity": 31.3 },
+                    { "temp": 57, "capacity": 31.3 },
+                    { "temp": 52, "capacity": 31.3 },
+                    { "temp": 47, "capacity": 31.3 },
+                    { "temp": 42, "capacity": 31.3 },
+                    { "temp": 37, "capacity": 31.3 },
+                    { "temp": 32, "capacity": 30.0 },
+                    { "temp": 27, "capacity": 28.7 },
+                    { "temp": 22, "capacity": 27.6 },
+                    { "temp": 17, "capacity": 26.3 },
+                    { "temp": 12, "capacity": 25.1 },
+                    { "temp": 7, "capacity": 23.5 },
+                    { "temp": 3, "capacity": 22.0 },
+                    { "temp": -4, "capacity": 20.7 }
+                ]
+            },
+            "BOVA20-60 + BIVA20-24 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 700,
+                "ratings": [
+                    { "temp": 86, "capacity": 31.3 },
+                    { "temp": 72, "capacity": 31.3 },
+                    { "temp": 67, "capacity": 31.3 },
+                    { "temp": 62, "capacity": 31.3 },
+                    { "temp": 57, "capacity": 31.3 },
+                    { "temp": 52, "capacity": 31.3 },
+                    { "temp": 47, "capacity": 31.3 },
+                    { "temp": 42, "capacity": 31.3 },
+                    { "temp": 37, "capacity": 31.3 },
+                    { "temp": 32, "capacity": 30.0 },
+                    { "temp": 27, "capacity": 28.7 },
+                    { "temp": 22, "capacity": 27.6 },
+                    { "temp": 17, "capacity": 26.3 },
+                    { "temp": 12, "capacity": 25.1 },
+                    { "temp": 7, "capacity": 23.5 },
+                    { "temp": 3, "capacity": 22.0 },
+                    { "temp": -4, "capacity": 20.7 }
+                ]
+            },
+            "BOVA20-60 + BIVA20-36 For Heating": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode",
+                "airflow": 1050,
+                "ratings": [
+                    { "temp": 86, "capacity": 34.6 },
+                    { "temp": 72, "capacity": 34.6 },
+                    { "temp": 67, "capacity": 34.6 },
+                    { "temp": 62, "capacity": 34.6 },
+                    { "temp": 57, "capacity": 34.6 },
+                    { "temp": 52, "capacity": 34.6 },
+                    { "temp": 47, "capacity": 34.6 },
+                    { "temp": 42, "capacity": 34.6 },
+                    { "temp": 37, "capacity": 34.6 },
+                    { "temp": 32, "capacity": 33.7 },
+                    { "temp": 27, "capacity": 32.7 },
+                    { "temp": 22, "capacity": 31.8 },
+                    { "temp": 17, "capacity": 30.6 },
+                    { "temp": 12, "capacity": 29.5 },
+                    { "temp": 7, "capacity": 28.0 },
+                    { "temp": 3, "capacity": 26.6 },
+                    { "temp": -4, "capacity": 25.3 }
+                ]
+            },
+            "BOVA20-48 + BIVA20-24 For Heating (High Airflow)": {
+                "consumerName": "Outdoor Unit (BOVA20) + Indoor Unit (BIVA20) – Heating Mode (High AF)",
+                "airflow": 1180,
+                "ratings": [
+                    { "temp": 86, "capacity": 31.3 },
+                    { "temp": 72, "capacity": 31.3 },
+                    { "temp": 67, "capacity": 31.3 },
+                    { "temp": 62, "capacity": 31.3 },
+                    { "temp": 57, "capacity": 31.3 },
+                    { "temp": 52, "capacity": 31.3 },
+                    { "temp": 47, "capacity": 31.3 },
+                    { "temp": 42, "capacity": 31.3 },
+                    { "temp": 37, "capacity": 31.3 },
+                    { "temp": 32, "capacity": 30.0 },
+                    { "temp": 27, "capacity": 28.7 },
+                    { "temp": 22, "capacity": 27.6 },
+                    { "temp": 17, "capacity": 26.3 },
+                    { "temp": 12, "capacity": 25.1 },
+                    { "temp": 7, "capacity": 23.5 },
+                    { "temp": 3, "capacity": 22.0 },
+                    { "temp": -4, "capacity": 20.7 }
+                ]
+            }
+        };
+
+
+        // --- Core Functions ---
+
+        document.addEventListener('DOMContentLoaded', () => {
+            populateUnitOptions();
+            // Initial plot to show empty state/axes
+            plotChart([], []); 
+        });
+
+        function populateUnitOptions() {
+            const select = document.getElementById('hvacUnit');
+            select.innerHTML = '<option value="" disabled selected>-- Select an HVAC Unit --</option>';
+            Object.keys(HVAC_DATA).forEach(key => {
+                const option = document.createElement('option');
+                option.value = key;
+                option.textContent = key;
+                select.appendChild(option);
+            });
+        }
+        
+        // Equation for Heat Load Line: Load = (Design Load / (Set Point - Design Temp)) * (Set Point - Outdoor Temp)
+        function calculateHouseLoad(outdoorTemp, setPoint, designTemp, designLoad) {
+            if (setPoint <= outdoorTemp) return 0; // No load if outdoor temp is above or equal to set point
+            // Calculate the K-factor (Heat Loss Coefficient)
+            const K = designLoad / (setPoint - designTemp);
+            // Calculate the current load based on the temperature difference
+            return K * (setPoint - outdoorTemp);
+        }
+
+        /**
+         * Finds the Balance Point using linear interpolation.
+         * @param {Array<Object>} ratings - Array of {temp, capacity} points for the HP.
+         * @param {function(number): number} houseLoadFn - Function to calculate house load at a given temp.
+         * @returns {number | string} The calculated balance point or an error message.
+         */
+        function findBalancePoint(ratings, houseLoadFn) {
+            // Sort data by temperature descending (T1 is always warmer than T2)
+            ratings.sort((a, b) => b.temp - a.temp);
+
+            for (let i = 0; i < ratings.length - 1; i++) {
+                const t1 = ratings[i].temp;
+                const c1 = ratings[i].capacity;
+                const l1 = houseLoadFn(t1);
+
+                const t2 = ratings[i + 1].temp;
+                const c2 = ratings[i + 1].capacity;
+                const l2 = houseLoadFn(t2);
+
+                // Define net capacity (HP Capacity - Load) at each point
+                const net1 = c1 - l1;
+                const net2 = c2 - l2;
+                
+                // Balance point occurs where Net changes sign (or is 0)
+                if ((net1 >= 0 && net2 <= 0) || (net1 <= 0 && net2 >= 0)) {
+                    // Linear interpolation on the Net Capacity (y-axis) vs Temperature (x-axis)
+                    // We are solving for T where Net = 0.
+                    const tempDiff = t2 - t1;
+                    const netDiff = net2 - net1;
+
+                    if (netDiff === 0) {
+                        return t1; // Should not happen often, but handles flat net capacity
+                    }
+                    
+                    // Interpolation Formula: T_BP = T1 - Net1 * (T2 - T1) / (Net2 - Net1)
+                    const balancePoint = t1 - (net1 * tempDiff / netDiff);
+                    return balancePoint;
+                }
+            }
+            
+            // Check if capacity is below load at all points (BP is above highest data temp)
+            if (houseLoadFn(ratings[0].temp) > ratings[0].capacity) {
+                 return "Above range (Heat Load is greater than HP capacity even at warm temps).";
+            }
+            // Check if capacity is always above load (BP is below lowest data temp)
+            if (houseLoadFn(ratings[ratings.length - 1].temp) < ratings[ratings.length - 1].capacity) {
+                 return "Below range (HP capacity is always greater than Heat Load down to the lowest temp).";
+            }
+
+            return "Error: Could not find balance point (Check data for non-monotonic points).";
+        }
+
+        function calculateAndPlot() {
+            const unitKey = document.getElementById('hvacUnit').value;
+            const designLoad = parseFloat(document.getElementById('designLoad').value);
+            const designTemp = parseFloat(document.getElementById('designTemp').value);
+            const setPoint = parseFloat(document.getElementById('setPoint').value);
+            
+            const bpValueEl = document.getElementById('bpValue');
+            const bpMessageEl = document.getElementById('bpMessage');
+
+            // --- Input Validation ---
+            if (!unitKey) {
+                bpValueEl.textContent = '--';
+                bpMessageEl.textContent = 'Please select an HVAC unit.';
+                plotChart([], []);
+                return;
+            }
+            if (isNaN(designLoad) || designLoad <= 0 || isNaN(designTemp) || isNaN(setPoint) || (setPoint - designTemp) <= 0) {
+                bpValueEl.textContent = '--';
+                bpMessageEl.textContent = 'Please check and enter valid House Load parameters.';
+                plotChart([], []);
+                return;
+            }
+            
+            const unitData = HVAC_DATA[unitKey];
+            
+            // 1. Calculate the House Load Function (Closure for easier use)
+            const houseLoadFn = (temp) => calculateHouseLoad(temp, setPoint, designTemp, designLoad);
+            
+            // 2. Find the Balance Point
+            const bpResult = findBalancePoint(unitData.ratings, houseLoadFn);
+
+            // 3. Prepare data for the graph
+            const hpPoints = unitData.ratings.map(r => ({x: r.temp, y: r.capacity}));
+            
+            // Determine graph range and step
+            const allHPTemps = unitData.ratings.map(r => r.temp);
+            const minTemp = Math.floor(Math.min(...allHPTemps, designTemp) / 5) * 5;
+            const maxTemp = Math.ceil(Math.max(...allHPTemps, setPoint) / 5) * 5;
+            const step = 5; 
+
+            // Generate House Load points across the temperature range
+            let loadPoints = [];
+            for (let t = maxTemp; t >= minTemp; t -= step) {
+                // Only calculate load if temperature is below the set point
+                const load = houseLoadFn(t);
+                if (load > 0) {
+                    loadPoints.push({ x: t, y: load });
+                }
+            }
+            // Ensure the Design Temp and Set Point (0 load) points are included
+            loadPoints.push({ x: designTemp, y: houseLoadFn(designTemp) });
+            loadPoints.push({ x: setPoint, y: 0 }); 
+            loadPoints.sort((a, b) => b.x - a.x); // Sort descending temp for line drawing
+            
+            let intersectionPoint = null;
+            let finalBP = null;
+            let intersectionCapacity = 0;
+
+            if (typeof bpResult === 'number') {
+                finalBP = parseFloat(bpResult.toFixed(1));
+                intersectionCapacity = houseLoadFn(finalBP);
+                intersectionPoint = { x: finalBP, y: intersectionCapacity };
+                
+                bpValueEl.textContent = `${finalBP}°F`;
+                bpMessageEl.textContent = `The Heat Pump Capacity (${intersectionCapacity.toFixed(1)} kBTU/h) matches the Home Load at this temperature.`;
+                document.getElementById('resultOutput').classList.replace('bg-red-100', 'bg-green-50');
+            } else {
+                // Error/Range message
+                bpValueEl.textContent = '--';
+                bpMessageEl.textContent = bpResult;
+                document.getElementById('resultOutput').classList.replace('bg-green-50', 'bg-red-100');
+            }
+
+            // 4. Plot the graph
+            plotChart(hpPoints, loadPoints, intersectionPoint, unitKey, finalBP);
+        }
+
+        /**
+         * Initializes or updates the Chart.js graph.
+         */
+        function plotChart(hpPoints, loadPoints, intersectionPoint, unitKey, finalBP) {
+            const ctx = document.getElementById('balancePointChart').getContext('2d');
+
+            if (balancePointChart) {
+                balancePointChart.destroy();
+            }
+            
+            // Determine maximum Y axis value for better scaling
+            const allCapacities = [...hpPoints.map(p => p.y), ...loadPoints.map(p => p.y)];
+            const maxCapacity = allCapacities.length > 0 ? Math.max(...allCapacities) * 1.1 : 50; 
+            
+            // Determine maximum X axis value for better scaling
+            const allTemps = [...hpPoints.map(p => p.x), ...loadPoints.map(p => p.x)];
+            const minTemp = allTemps.length > 0 ? Math.min(...allTemps) - 5 : 0;
+            const maxTemp = allTemps.length > 0 ? Math.max(...allTemps) + 5 : 100;
+
+            const datasets = [
+                // Heat Pump Capacity Curve
+                {
+                    label: 'Heat Pump Capacity (kBTU/h)',
+                    data: hpPoints,
+                    borderColor: '#4f46e5', // Indigo-600
+                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointBackgroundColor: '#4f46e5',
+                    fill: false,
+                    spanGaps: true,
+                    showLine: true,
+                    // Plotting using 'x' and 'y' for scatter/line mix
+                    parsing: false, 
+                },
+                // House Heat Load Line
+                {
+                    label: 'House Heat Load (kBTU/h)',
+                    data: loadPoints,
+                    borderColor: '#ef4444', // Red-500
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    tension: 0, // Straight line
+                    pointRadius: 3,
+                    pointBackgroundColor: '#ef4444',
+                    borderDash: [5, 5],
+                    fill: false,
+                    spanGaps: true,
+                    showLine: true,
+                    parsing: false,
+                }
+            ];
+
+            // Add Intersection Point if found
+            if (intersectionPoint) {
+                datasets.push({
+                    label: `Balance Point: ${finalBP}°F`,
+                    data: [intersectionPoint],
+                    borderColor: '#10b981', // Green-500
+                    backgroundColor: '#10b981',
+                    type: 'scatter',
+                    pointRadius: 8,
+                    pointStyle: 'crossRot' // Use a clear cross style
+                });
+            }
+
+            balancePointChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top' },
+                        title: {
+                            display: true,
+                            text: `Performance for: ${unitKey || 'Select Unit'}`,
+                            font: { size: 16, weight: 'bold' }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                // Show temperature on X axis
+                                title: (context) => `Outdoor Temp: ${context[0].parsed.x.toFixed(1)}°F`, 
+                                // Show capacity on Y axis
+                                label: (context) => `${context.dataset.label}: ${context.parsed.y.toFixed(1)} kBTU/h` 
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: { display: true, text: 'Outdoor Temperature (°F)' },
+                            min: minTemp,
+                            max: maxTemp,
+                            reverse: true, // Temps typically decrease left-to-right
+                            ticks: { 
+                                stepSize: 5,
+                                autoSkip: true,
+                                maxTicksLimit: 15
+                            }
+                        },
+                        y: {
+                            title: { display: true, text: 'Heating Capacity (kBTU/h)' },
+                            beginAtZero: true,
+                            max: maxCapacity
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
